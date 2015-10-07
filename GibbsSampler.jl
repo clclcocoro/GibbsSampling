@@ -1,3 +1,6 @@
+using Distributions
+
+
 type PredictionResult
     proteinid::UTF8String
     decisionValues::Array{Float64}
@@ -69,12 +72,52 @@ end
 
 
 function gibbsSampling(prediction, graph)
+    iternum = 10000
+    σ = 1
+    J = 0.5
     maxIndex = length(prediction.predictionLabels)
-    currentState = map(x-> if x == 0 return -1 else return 1 end, prediction.predictionLabels)
-    for index in rand(1:maxIndex)
-
+    ys = map(x-> if x == 0 return -1 else return 1 end, prediction.predictionLabels)
+    currentStates = map(x-> if x == 0 return -1 else return 1 end, prediction.predictionLabels)
+    sampled = Array{Int8, 1}[]
+    for i in 1:maxIndex
+        push!(sampled, [])
     end
+    for i in 1:iternum
+        index = rand(1:maxIndex)
+        neighbors = graph[index-1]
+        currentState = currentStates[index]
+        flippedState = -1*currentState
+        dθ = 0
+        dθ′ = 0 
+        for neighbor in neighbors
+            if currentStates[neighbor+1] != currentState
+                dθ += 1
+            else
+                dθ′ += 1
+            end
+        end
+        p′ = exp(-(ys[index]-flippedState)^2/2*(σ^2))*exp(-2*J*(dθ′))
+        p  = exp(-(ys[index]-currentState)^2/2*(σ^2))*exp(-2*J*(dθ))
+        conditional_p′ = p′ / (p + p′)
+        dist = Binomial(1, conditional_p′)
+        newState = rand(dist)
+        if newState == 1
+            newState = -1 * currentState
+        else
+            newState = currentState
+        end
+        #@show index
+        #@show ys[index]
+        #@show currentState
+        #@show newState
+        #@show conditional_p′
+        #@show currentStates
+        push!(sampled[index], newState)
+        currentStates[index] = newState
+    end
+    return sampled
 end
+
 
 function main()
     predictionFile = ARGS[1]
@@ -83,8 +126,11 @@ function main()
     @show predictions
     graphs = parseGraphFiles(predictions, graphDir)
     @show graphs
-    for proteinid in keys(predictions)
-        gibbsSampling(predictions[proteinid], graphs[proteinid])
+    for i in 1:100
+        for proteinid in keys(predictions)
+            sampled =  gibbsSampling(predictions[proteinid], graphs[proteinid].graph)
+            @show map(mean, sampled)
+        end
     end
 end
 
