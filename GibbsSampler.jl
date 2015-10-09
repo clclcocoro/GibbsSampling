@@ -156,41 +156,9 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
             d = disagreeingEdgeNumber(selfState, neighborStates, [1:length(neighborStates)])
             Z += expEnergy(ys[i], selfState, σ, J, d)
             Z += expEnergy(-ys[i], selfState, σ, J, d)
-            #Z += expEnergy(selfState, selfState, σ, J, d)
-            #@show neighborStates
-            #@show ys[i]
-            #@show d
-            #@show expEnergy(ys[i], selfState, σ, J, d)
-            #@show expEnergy(ys[i], selfState, σ, J, d)
-            #@show σ
-            #@show selfState
-            #@show Z
-            #@show neighborStates
-            #for j in 1:length(neighborStates)
-            #    neighborState = neighborStates[j]
-            #    dNeighbor = isDisagreeing(selfState, neighborState)
-            #    #dNeighbor = 0
-            #    Z += expEnergy(ys[neighbors[j]], neighborState, σ, J, dNeighbor)
-            #    #@show ys[neighbors[j]]
-            #    #@show neighborState
-            #    #@show dNeighbor
-            #    #@show expEnergy(ys[neighbors[j]], neighborState, σ, J, dNeighbor)
-            #    #@show Z
-            #end
         end
         d = disagreeingEdgeNumber(xs[i], xs, neighbors)
         currExpEnergy  = expEnergy(ys[i], xs[i], σ, J, d)
-        #currExpEnergy  = expEnergy(xs[i], xs[i], σ, J, d)
-        #@show expEnergy(ys[i], xs[i], σ, J, d)
-        #@show xs
-        #@show neighbors
-        #@show d
-        #@show currExpEnergy
-        #for neighbor in neighbors
-        #    dNeighbor = isDisagreeing(xs[i], xs[neighbor])
-        #    #dNeighbor = 0
-        #    currExpEnergy += expEnergy(ys[neighbor], xs[neighbor], σ, J, dNeighbor)
-        #end
         p = currExpEnergy / Z
         logPseLike += log(p)
 
@@ -203,12 +171,6 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
         currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
         p = currExpEnergy / Z
         logPseLike += log(p)
-        #@show i
-        #@show currExpEnergy
-        #@show p
-        #@show Z
-        #@show logPseLike
-        #@show allState
     end
     return logPseLike
 end
@@ -216,9 +178,9 @@ end
 
 function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, burnIn)
     maxIndex = length(ys)
-    #dist = Binomial(1, 0.5)
-    #currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
-    currentStates = copy(ys)
+    dist = Binomial(1, 0.5)
+    currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
+    #currentStates = copy(ys)
     sampled = Array{Int8, 1}[]
     for i in 1:maxIndex
         push!(sampled, [])
@@ -230,7 +192,6 @@ function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, bur
         s′ = -1*s     # flipped state
         d  = disagreeingEdgeNumber(s, currentStates, neighbors)
         d′ = disagreeingEdgeNumber(s′, currentStates, neighbors)
-        #r′ = exp( ((2*ys[index]*s′)/(σ^2)) + (-2*J*(d′-d)) ) # flippedProb / currentProb
         r′ = exp((2*ys[index]*s′)/(σ^2))*exp(-2*J*(d′-d))  # flippedProb / currentProb
         p′ = r′ / (1 + r′)
         dist = Binomial(1, p′)
@@ -255,26 +216,23 @@ function main()
     graphDir       = ARGS[3]
     iternum        = 100000
     burnIn         = 10000
+    σRange         = (0.5, 1.5)
+    JRange         = (0.5, 1.5)
+    σGrid          = 100
+    JGrid          = 100
     #σ              = 1
     #J              = 0.5
     predictions =  parsePredictionFile(predictionFile)
-    @show predictions
     corrects = parseCorrectFile(correctFile)
-    @show corrects
     graphs = parseGraphFiles(predictions, graphDir)
-    @show graphs
     logPseudolikelihoods = Tuple[]
     maxPseudolikelihood = (0.0, 0.0, -Inf) # σ, J, logPseudolikelihood
-    for σ in 1:20
-        σ /= 10.0
-        for J in 1:20
-            J /= 10.0
+    for σG in 0:σGrid
+        σ = (σG/float(σGrid)) * (σRange[2]-σRange[1]) + σRange[1]
+        for JG in 0:JGrid
+            J = (JG/float(JGrid)) * (JRange[2]-JRange[1]) + JRange[1]
             logPseLike = 0
             for proteinid in keys(predictions)
-                #@show proteinid
-                #@show corrects[proteinid]
-                #@show predictions[proteinid].predictionLabels
-                #@show graphs[proteinid].graph
                 logPseLike += pseudolikelihood(corrects[proteinid], predictions[proteinid].predictionLabels, 
                                                                         σ, J, graphs[proteinid].graph)
             end
@@ -284,29 +242,24 @@ function main()
             end
         end
     end
-    #@show logPseudolikelihoods
     sort!(logPseudolikelihoods, by=x->x[3], rev=true)
     for logPseudolikelihood in logPseudolikelihoods[1:20]
         @show logPseudolikelihood
     end
     @show maxPseudolikelihood
-    σ              = 1.0
-    J              = 0.6
     proteinApproxMeans = Dict{UTF8String, Array{Array{Float64, 1}}}()
     for proteinid in keys(predictions)
         proteinApproxMeans[proteinid] = Array{Array{Float64, 1}}[]
     end
     for i in 1:10
         for proteinid in keys(predictions)
-            approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, σ, J, graphs[proteinid].graph, burnIn)
-            #approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, maxPseudolikelihood[1],
-                                                    #maxPseudolikelihood[2], graphs[proteinid].graph, burnIn)
+            approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, maxPseudolikelihood[1],
+                                                    maxPseudolikelihood[2], graphs[proteinid].graph, burnIn)
             push!(proteinApproxMeans[proteinid], approxMean)
         end
     end
     for proteinid in keys(predictions)
         @show proteinid
-        #@show proteinApproxMeans[proteinid]
         @show mean(proteinApproxMeans[proteinid])
     end
 end
