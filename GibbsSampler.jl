@@ -25,13 +25,17 @@ function parsePredictionFile(predictionFile)
             continue
         end
         proteinid, index, decisionValue, predictionLabel = split(line, '\t')
-        push!(decisionValues, float(decisionValue))
-        push!(predictionLabels, int(predictionLabel))
         if c != 0 && proteinid != prevProteinid
+            predictionLabels = map(x-> if x == 0 return -1 else return 1 end, predictionLabels)
             predictionResult = PredictionResult(prevProteinid, decisionValues, predictionLabels)
             predictions[prevProteinid] = predictionResult
             dicisionValues = Float64[]
             predictionLabels = Int64[]
+            push!(decisionValues, float(decisionValue))
+            push!(predictionLabels, int(predictionLabel))
+        else
+            push!(decisionValues, float(decisionValue))
+            push!(predictionLabels, int(predictionLabel))
         end
         prevProteinid = proteinid
         c += 1
@@ -46,15 +50,27 @@ end
 
 
 function parseCorrectFile(correctFile)
+    corrects = Dict{UTF8String, Array{Int64, 1}}()
     correctLabels = Int64[]
+    prevProteinid = ""
+    c = 0
     for line in eachline(open(correctFile))
         if length(rstrip(line)) == 0
             continue
         end
         proteinid, index, correctLabel = split(line, '\t')
+        if c != 0 && proteinid != prevProteinid
+            corrects[prevProteinid] = correctLabels
+            correctLabels = Int64[]
+        end
         push!(correctLabels, int(correctLabel))
+        prevProteinid = proteinid
+        c += 1
     end
-    return correctLabels
+    if length(correctLabels) != 0
+        corrects[prevProteinid] = correctLabels
+    end
+    return corrects
 end
 
 
@@ -131,6 +147,7 @@ end
 function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
     logPseLike = 0
     for i in 1:length(xs)
+        # For x
         neighbors = graph[i]
         allState = getAllState(length(neighbors)+1)
         Z = 0
@@ -138,6 +155,7 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
             selfState, neighborStates = encodeState(state)
             d = disagreeingEdgeNumber(selfState, neighborStates, [1:length(neighborStates)])
             Z += expEnergy(ys[i], selfState, σ, J, d)
+            Z += expEnergy(-ys[i], selfState, σ, J, d)
             #Z += expEnergy(selfState, selfState, σ, J, d)
             #@show neighborStates
             #@show ys[i]
@@ -175,6 +193,16 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
         #end
         p = currExpEnergy / Z
         logPseLike += log(p)
+
+        # For y
+        Z = 0
+        Z += expEnergy(ys[i], xs[i], σ, J, 0)
+        Z += expEnergy(-ys[i], xs[i], σ, J, 0)
+        Z += expEnergy(ys[i], -xs[i], σ, J, 0)
+        Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
+        currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
+        p = currExpEnergy / Z
+        logPseLike += log(p)
         #@show i
         #@show currExpEnergy
         #@show p
@@ -188,9 +216,9 @@ end
 
 function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, burnIn)
     maxIndex = length(ys)
-    dist = Binomial(1, 0.5)
-    currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
-    #currentStates = copy(ys)
+    #dist = Binomial(1, 0.5)
+    #currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
+    currentStates = copy(ys)
     sampled = Array{Int8, 1}[]
     for i in 1:maxIndex
         push!(sampled, [])
@@ -202,23 +230,16 @@ function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, bur
         s′ = -1*s     # flipped state
         d  = disagreeingEdgeNumber(s, currentStates, neighbors)
         d′ = disagreeingEdgeNumber(s′, currentStates, neighbors)
-        r′ = exp( (2*ys[index]*s′)/σ^2 + (-2*J*(d′-d)) ) # flippedProb / currentProb
+        #r′ = exp( ((2*ys[index]*s′)/(σ^2)) + (-2*J*(d′-d)) ) # flippedProb / currentProb
+        r′ = exp((2*ys[index]*s′)/(σ^2))*exp(-2*J*(d′-d))  # flippedProb / currentProb
         p′ = r′ / (1 + r′)
         dist = Binomial(1, p′)
         flip_or_remain = rand(dist) # 1 means flip, 0 means remain.
         if flip_or_remain == 1
-            newState = -1 * s
-            push!(sampled[index], newState)
-            currentStates[index] = newState
+            newState = s′
         else
             newState = s
         end
-        #@show index
-        #@show ys[index]
-        #@show currentState
-        #@show newState
-        #@show conditional_p′
-        #@show currentStates
         if i > burnIn
             push!(sampled[index], newState)
         end
@@ -238,8 +259,8 @@ function main()
     #J              = 0.5
     predictions =  parsePredictionFile(predictionFile)
     @show predictions
-    correctLabels = parseCorrectFile(correctFile)
-    @show correctLabels
+    corrects = parseCorrectFile(correctFile)
+    @show corrects
     graphs = parseGraphFiles(predictions, graphDir)
     @show graphs
     logPseudolikelihoods = Tuple[]
@@ -250,7 +271,11 @@ function main()
             J /= 10.0
             logPseLike = 0
             for proteinid in keys(predictions)
-                logPseLike += pseudolikelihood(correctLabels, predictions[proteinid].predictionLabels, 
+                #@show proteinid
+                #@show corrects[proteinid]
+                #@show predictions[proteinid].predictionLabels
+                #@show graphs[proteinid].graph
+                logPseLike += pseudolikelihood(corrects[proteinid], predictions[proteinid].predictionLabels, 
                                                                         σ, J, graphs[proteinid].graph)
             end
             push!(logPseudolikelihoods, (σ, J, logPseLike))
@@ -265,15 +290,24 @@ function main()
         @show logPseudolikelihood
     end
     @show maxPseudolikelihood
-    #σ              = 1
-    #J              = 0.6
+    σ              = 1.0
+    J              = 0.6
+    proteinApproxMeans = Dict{UTF8String, Array{Array{Float64, 1}}}()
+    for proteinid in keys(predictions)
+        proteinApproxMeans[proteinid] = Array{Array{Float64, 1}}[]
+    end
     for i in 1:10
         for proteinid in keys(predictions)
-            #approxMean =  gibbsSampling(predictions[proteinid], iternum, σ, J, graphs[proteinid].graph)
-            approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, maxPseudolikelihood[1],
-                                                    maxPseudolikelihood[2], graphs[proteinid].graph, burnIn)
-            @show approxMean
+            approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, σ, J, graphs[proteinid].graph, burnIn)
+            #approxMean =  gibbsSampling(predictions[proteinid].predictionLabels, iternum, maxPseudolikelihood[1],
+                                                    #maxPseudolikelihood[2], graphs[proteinid].graph, burnIn)
+            push!(proteinApproxMeans[proteinid], approxMean)
         end
+    end
+    for proteinid in keys(predictions)
+        @show proteinid
+        #@show proteinApproxMeans[proteinid]
+        @show mean(proteinApproxMeans[proteinid])
     end
 end
 
