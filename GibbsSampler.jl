@@ -147,20 +147,32 @@ end
 function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
     logPseLike = 0
     for i in 1:length(xs)
+
         # For x
-        neighbors = graph[i]
-        allState = getAllState(length(neighbors)+1)
-        Z = 0
-        for state in allState
-            selfState, neighborStates = encodeState(state)
-            d = disagreeingEdgeNumber(selfState, neighborStates, [1:length(neighborStates)])
-            Z += expEnergy(ys[i], selfState, σ, J, d)
-            Z += expEnergy(-ys[i], selfState, σ, J, d)
+        if haskey(graph, i) 
+            neighbors = graph[i]
+            allState = getAllState(length(neighbors)+1)
+            Z = 0
+            for state in allState
+                selfState, neighborStates = encodeState(state)
+                d = disagreeingEdgeNumber(selfState, neighborStates, [1:length(neighborStates)])
+                Z += expEnergy(ys[i], selfState, σ, J, d)
+                Z += expEnergy(-ys[i], selfState, σ, J, d)
+            end
+            d = disagreeingEdgeNumber(xs[i], xs, neighbors)
+            currExpEnergy  = expEnergy(ys[i], xs[i], σ, J, d)
+            p = currExpEnergy / Z
+            logPseLike += log(p)
+        else # has No Edge.
+            Z = 0
+            Z += expEnergy(ys[i], xs[i], σ, J, 0)
+            Z += expEnergy(-ys[i], xs[i], σ, J, 0)
+            Z += expEnergy(ys[i], -xs[i], σ, J, 0)
+            Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
+            currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
+            p = currExpEnergy / Z
+            logPseLike += log(p)
         end
-        d = disagreeingEdgeNumber(xs[i], xs, neighbors)
-        currExpEnergy  = expEnergy(ys[i], xs[i], σ, J, d)
-        p = currExpEnergy / Z
-        logPseLike += log(p)
 
         # For y
         Z = 0
@@ -187,13 +199,20 @@ function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, bur
     end
     for i in 1:iternum
         index = rand(1:maxIndex)
-        neighbors = graph[index]
-        s = currentStates[index] # current state 
-        s′ = -1*s     # flipped state
-        d  = disagreeingEdgeNumber(s, currentStates, neighbors)
-        d′ = disagreeingEdgeNumber(s′, currentStates, neighbors)
-        r′ = exp((2*ys[index]*s′)/(σ^2))*exp(-2*J*(d′-d))  # flippedProb / currentProb
-        p′ = r′ / (1 + r′)
+        if haskey(graph, index)
+            neighbors = graph[index]
+            s = currentStates[index] # current state 
+            s′ = -1*s     # flipped state
+            d  = disagreeingEdgeNumber(s, currentStates, neighbors)
+            d′ = disagreeingEdgeNumber(s′, currentStates, neighbors)
+            r′ = exp((2*ys[index]*s′)/(σ^2))*exp(-2*J*(d′-d))  # flippedProb / currentProb
+            p′ = r′ / (1 + r′)
+        else # has No Edge.
+            s = currentStates[index] # current state 
+            s′ = -1*s     # flipped state
+            r′ = exp((2*ys[index]*s′)/(σ^2))  # flippedProb / currentProb
+            p′ = r′ / (1 + r′)
+        end
         dist = Binomial(1, p′)
         flip_or_remain = rand(dist) # 1 means flip, 0 means remain.
         if flip_or_remain == 1
