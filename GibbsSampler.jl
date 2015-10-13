@@ -32,10 +32,10 @@ function parsePredictionFile(predictionFile)
             dicisionValues = Float64[]
             predictionLabels = Int64[]
             push!(decisionValues, float(decisionValue))
-            push!(predictionLabels, int(predictionLabel))
+            push!(predictionLabels, parse(Int, predictionLabel))
         else
             push!(decisionValues, float(decisionValue))
-            push!(predictionLabels, int(predictionLabel))
+            push!(predictionLabels, parse(Int, predictionLabel))
         end
         prevProteinid = proteinid
         c += 1
@@ -63,7 +63,7 @@ function parseCorrectFile(correctFile)
             corrects[prevProteinid] = correctLabels
             correctLabels = Int64[]
         end
-        push!(correctLabels, int(correctLabel))
+        push!(correctLabels, parse(Int, correctLabel))
         prevProteinid = proteinid
         c += 1
     end
@@ -80,7 +80,7 @@ function parseGraphFile(proteinid, graphFile)
         if length(rstrip(line)) == 0
             continue
         end
-        left, right = map(int, split(line, ' '))
+        left, right = map(x->parse(Int, x), split(line, ' '))
 
         #convert to Julia index (start from 1)
         left += 1  
@@ -155,7 +155,7 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
             Z = 0
             for state in allState
                 selfState, neighborStates = encodeState(state)
-                d = disagreeingEdgeNumber(selfState, neighborStates, [1:length(neighborStates)])
+                d = disagreeingEdgeNumber(selfState, neighborStates, collect(1:length(neighborStates)))
                 Z += expEnergy(ys[i], selfState, σ, J, d)
                 Z += expEnergy(-ys[i], selfState, σ, J, d)
             end
@@ -175,14 +175,14 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
         end
 
         # For y
-        Z = 0
-        Z += expEnergy(ys[i], xs[i], σ, J, 0)
-        Z += expEnergy(-ys[i], xs[i], σ, J, 0)
-        Z += expEnergy(ys[i], -xs[i], σ, J, 0)
-        Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
-        currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
-        p = currExpEnergy / Z
-        logPseLike += log(p)
+        #Z = 0
+        #Z += expEnergy(ys[i], xs[i], σ, J, 0)
+        #Z += expEnergy(-ys[i], xs[i], σ, J, 0)
+        #Z += expEnergy(ys[i], -xs[i], σ, J, 0)
+        #Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
+        #currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
+        #p = currExpEnergy / Z
+        #logPseLike += log(p)
     end
     return logPseLike
 end
@@ -230,6 +230,14 @@ end
 
 
 function main()
+    try
+        predictionFile = ARGS[1]
+        correctFile    = ARGS[2]
+        graphDir       = ARGS[3]
+    catch exception
+        println(Usage)
+        exit()
+    end
     predictionFile = ARGS[1]
     correctFile    = ARGS[2]
     graphDir       = ARGS[3]
@@ -282,5 +290,40 @@ function main()
         @show mean(proteinApproxMeans[proteinid])
     end
 end
+
+Usage = """
+
+Usage:
+    julia gibbs_sampler.jl <prediction_output> <correct_label_file> <graph_dir>
+
+
+FORMAT:
+
+<prediction_output>
+    proteinid\tindex\t0
+    proteinid\tindex\t1
+    proteinid\tindex\t0
+    proteinid\tindex\t0
+    ...
+
+<correct_label_file>
+    proteinid\tindex\t0
+    proteinid\tindex\t1
+    proteinid\tindex\t0
+    proteinid\tindex\t0
+    ...
+
+<graph_dir> is a directory that includes protein_graph_file
+protein_graph_file must be "proteinid.graph"
+
+protein_graph_file FORMAT:
+
+    0 1
+    1 4
+    2 3
+    2 4
+    3 1
+    ...
+"""
 
 main()
