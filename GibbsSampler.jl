@@ -151,38 +151,32 @@ function pseudolikelihood(xs, ys, σ, J, graph::Dict{Int64, Array{Int64}})
         # For x
         if haskey(graph, i) 
             neighbors = graph[i]
-            allState = getAllState(length(neighbors)+1)
-            Z = 0
-            for state in allState
-                selfState, neighborStates = encodeState(state)
-                d = disagreeingEdgeNumber(selfState, neighborStates, collect(1:length(neighborStates)))
-                Z += expEnergy(ys[i], selfState, σ, J, d)
-                Z += expEnergy(-ys[i], selfState, σ, J, d)
-            end
-            d = disagreeingEdgeNumber(xs[i], xs, neighbors)
-            currExpEnergy  = expEnergy(ys[i], xs[i], σ, J, d)
-            p = currExpEnergy / Z
+            #Z = 0
+            s = xs[i] # current state 
+            s′ = -1*s # flipped state
+            d  = disagreeingEdgeNumber(s, xs, neighbors)
+            d′ = disagreeingEdgeNumber(s′, xs, neighbors)
+            r  = exp((2*ys[i]*s)/(σ^2))*exp(-2*J*(d-d′))  # currentProb / flippedProb
+            p = r / (1 + r)
+            #d = disagreeingEdgeNumber(-xs[i], xs, neighbors)
+            #Z += expEnergy(ys[i], -xs[i], σ, J, d)
+            #d = disagreeingEdgeNumber(xs[i], xs, neighbors)
+            #currExpEnergy = expEnergy(ys[i], xs[i], σ, J, d)
+            #Z += currExpEnergy
+            #p = currExpEnergy / Z
             logPseLike += log(p)
         else # has No Edge.
-            Z = 0
-            Z += expEnergy(ys[i], xs[i], σ, J, 0)
-            Z += expEnergy(-ys[i], xs[i], σ, J, 0)
-            Z += expEnergy(ys[i], -xs[i], σ, J, 0)
-            Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
-            currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
-            p = currExpEnergy / Z
+            #Z = 0
+            s = xs[i] # current state 
+            s′ = -1*s     # flipped state
+            r = exp((2*ys[i]*s)/(σ^2))  # currentProb / flippedProb
+            p = r / (1 + r)
+            #Z += expEnergy(ys[i], xs[i], σ, J, 0)
+            #Z += expEnergy(ys[i], -xs[i], σ, J, 0)
+            #currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
+            #p = currExpEnergy / Z
             logPseLike += log(p)
         end
-
-        # For y
-        #Z = 0
-        #Z += expEnergy(ys[i], xs[i], σ, J, 0)
-        #Z += expEnergy(-ys[i], xs[i], σ, J, 0)
-        #Z += expEnergy(ys[i], -xs[i], σ, J, 0)
-        #Z += expEnergy(-ys[i], -xs[i], σ, J, 0)
-        #currExpEnergy = expEnergy(ys[i], xs[i], σ, J, 0)
-        #p = currExpEnergy / Z
-        #logPseLike += log(p)
     end
     return logPseLike
 end
@@ -190,9 +184,9 @@ end
 
 function gibbsSampling(ys, iternum, σ, J, graph::Dict{Int64, Array{Int64}}, burnIn)
     maxIndex = length(ys)
-    dist = Binomial(1, 0.5)
-    currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
-    #currentStates = copy(ys)
+    #dist = Binomial(1, 0.5)
+    #currentStates = map(x->if x == 0 return -1 else return 1 end, rand(dist, maxIndex))
+    currentStates = copy(ys)
     sampled = Array{Int8, 1}[]
     for i in 1:maxIndex
         push!(sampled, [])
@@ -243,12 +237,10 @@ function main()
     graphDir       = ARGS[3]
     iternum        = 100000
     burnIn         = 10000
-    σRange         = (0.5, 1.5)
-    JRange         = (0.5, 1.5)
+    σRange         = (0.1, 2.0)
+    JRange         = (0.1, 2.0)
     σGrid          = 100
     JGrid          = 100
-    #σ              = 1
-    #J              = 0.5
     predictions =  parsePredictionFile(predictionFile)
     corrects = parseCorrectFile(correctFile)
     graphs = parseGraphFiles(predictions, graphDir)
@@ -270,7 +262,7 @@ function main()
         end
     end
     sort!(logPseudolikelihoods, by=x->x[3], rev=true)
-    for logPseudolikelihood in logPseudolikelihoods[1:20]
+    for logPseudolikelihood in logPseudolikelihoods[1:10]
         @show logPseudolikelihood
     end
     @show maxPseudolikelihood
@@ -287,6 +279,9 @@ function main()
     end
     for proteinid in keys(predictions)
         @show proteinid
+        for eachMean in proteinApproxMeans[proteinid]
+            @show eachMean
+        end
         @show mean(proteinApproxMeans[proteinid])
     end
 end
